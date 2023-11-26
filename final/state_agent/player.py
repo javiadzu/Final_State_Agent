@@ -2,6 +2,7 @@
 from os import path 
 import numpy as np 
 import torch 
+import matplotlib.pyplot as plt
 
 def limit_period(angle):
     # turn angle into -1 to 1 
@@ -56,7 +57,7 @@ class Team:
                  'wilber', 'xue'. Default: 'tux'
         """
         """
-           T
+           TODO: feel free to edit or delete any of the code below
         """
         self.team, self.num_players = team, num_players
         return ['tux'] * num_players
@@ -92,7 +93,10 @@ class Team:
                  rescue:       bool (optional. no clue where you will end up though.)
                  steer:        float -1..1 steering angle
         """
-        print(player_state)
-        print(opponent_state)
-        print (soccer_state)
+        # TODO: Change me. I'm just cruising straight
         return [dict(acceleration=1, steer=0)] * self.num_players
+
+
+
+
+
