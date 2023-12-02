@@ -1,15 +1,12 @@
-
 from os import path 
-import numpy as np 
+import numpy as np
 import torch 
-import matplotlib.pyplot as plt 
-from . import model
 
 def limit_period(angle):
     # turn angle into -1 to 1 
     return angle - torch.floor(angle / 2 + 0.5) * 2 
 
-def extract_featuresV2(pstate, soccer_state, opponent_state, team_id):
+def extract_features(pstate, soccer_state, opponent_state, team_id):
     # features of ego-vehicle
     kart_front = torch.tensor(pstate['kart']['front'], dtype=torch.float32)[[0, 2]]
     kart_center = torch.tensor(pstate['kart']['location'], dtype=torch.float32)[[0, 2]]
@@ -23,18 +20,33 @@ def extract_featuresV2(pstate, soccer_state, opponent_state, team_id):
 
     kart_to_puck_angle_difference = limit_period((kart_angle - kart_to_puck_angle)/np.pi)
 
+    # features of opponents 
+    opponent_center0 = torch.tensor(opponent_state[0]['kart']['location'], dtype=torch.float32)[[0, 2]]
+    opponent_center1 = torch.tensor(opponent_state[1]['kart']['location'], dtype=torch.float32)[[0, 2]]
+
+    kart_to_opponent0 = (opponent_center0 - kart_center) / torch.norm(opponent_center0-kart_center)
+    kart_to_opponent1 = (opponent_center1 - kart_center) / torch.norm(opponent_center1-kart_center)
+
+    kart_to_opponent0_angle = torch.atan2(kart_to_opponent0[1], kart_to_opponent0[0]) 
+    kart_to_opponent1_angle = torch.atan2(kart_to_opponent1[1], kart_to_opponent1[0]) 
+
+    kart_to_opponent0_angle_difference = limit_period((kart_angle - kart_to_opponent0_angle)/np.pi)
+    kart_to_opponent1_angle_difference = limit_period((kart_angle - kart_to_opponent1_angle)/np.pi)
+
     # features of score-line 
-    goal_line_center = torch.tensor(soccer_state['goal_line'][(team_id+1)%2], dtype=torch.float32)[:, [0, 2]].mean(dim=0)
+    goal_line_center = torch.tensor(soccer_state['goal_line'][team_id], dtype=torch.float32)[:, [0, 2]].mean(dim=0)
 
     puck_to_goal_line = (goal_line_center-puck_center) / torch.norm(goal_line_center-puck_center)
+    puck_to_goal_line_angle = torch.atan2(puck_to_goal_line[1], puck_to_goal_line[0]) 
+    kart_to_goal_line_angle_difference = limit_period((kart_angle - puck_to_goal_line_angle)/np.pi)
 
-    features = torch.tensor([kart_center[0], kart_center[1], kart_angle, kart_to_puck_angle, 
-        goal_line_center[0], goal_line_center[1], kart_to_puck_angle_difference, 
-        puck_center[0], puck_center[1], puck_to_goal_line[0], puck_to_goal_line[1]], dtype=torch.float32)
+    features = torch.tensor([kart_center[0], kart_center[1], kart_angle, kart_to_puck_angle, opponent_center0[0],
+        opponent_center0[1], opponent_center1[0], opponent_center1[1], kart_to_opponent0_angle, kart_to_opponent1_angle, 
+        goal_line_center[0], goal_line_center[1], puck_to_goal_line_angle, kart_to_puck_angle_difference, 
+        kart_to_opponent0_angle_difference, kart_to_opponent1_angle_difference, 
+        kart_to_goal_line_angle_difference], dtype=torch.float32)
 
     return features 
-
-
 
 class Team:
     agent_type = 'state'
@@ -46,6 +58,8 @@ class Team:
         """
         self.team = None
         self.num_players = None
+        self.model0 = torch.jit.load(path.join(path.dirname(path.abspath(__file__)), 'geoffrey_agent0.pt'))
+        self.model1 = torch.jit.load(path.join(path.dirname(path.abspath(__file__)), 'geoffrey_agent1.pt'))
 
     def new_match(self, team: int, num_players: int) -> list:
         """
@@ -94,33 +108,13 @@ class Team:
                  rescue:       bool (optional. no clue where you will end up though.)
                  steer:        float -1..1 steering angle
         """
-        p1 = torch.empty(11)
-        p2 = torch.empty(11)
+        # TODO: Change me. I'm just cruising straight
+        actions = [] 
         for player_id, pstate in enumerate(player_state):
-          features = extract_featuresV2(pstate, soccer_state, opponent_state, self.team)
-          if player_id %2 == 0:
-             p1= features
-             
-          else:
-             p2=features
-             
-
-     
-        print()
-        # # TODO: Pasar la data por cada uno de los estados a la red neuronal para ver si funciona
-        # TODO: Verificar que funcione la 
-        action_net = model.ActionNet()
-        #print(action_net)
-        actor = model.Action(features)
-        #extract_featuresV2(player_state, opponent_state, soccer_state)
-        #print('XXXXXXXXX3')
-        #print(actor)
-
-
-
-        return [dict(acceleration=1, steer=0)] * self.num_players
-
-
-
-
-
+            features = extract_features(pstate, soccer_state, opponent_state, self.team)
+            if player_id % 2 == 0:
+                acceleration, steer, brake = self.model0(features)
+            else:
+                acceleration, steer, brake = self.model1(features) 
+            actions.append(dict(acceleration=acceleration, steer=steer, brake=brake))                        
+        return actions 
